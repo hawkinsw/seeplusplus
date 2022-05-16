@@ -1,0 +1,11 @@
+cmake_minimum_required(VERSION 3.15)
+
+project(SeePlusPlus VERSION 1.0 DESCRIPTION "A tool for converting C++ into HTML")
+include_directories("include/")
+set(LLVM_CONFIG_PATHS "/usr/lib/llvm-11/lib/cmake")
+find_package(LLVM REQUIRED CONFIG PATHS ${LLVM_CONFIG_PATHS} NO_DEFAULT_PATH)
+find_package(Clang REQUIRED CONFIG PATHS ${LLVM_CONFIG_PATHS} NO_DEFAULT_PATH)
+add_executable(see++ main.cpp)
+set_property(TARGET see++ PROPERTY CXX_STANDARD 20)
+target_include_directories(see++ PUBLIC ${LLVM_INCLUDE_DIRS})
+target_link_libraries(see++ PUBLIC libclang clangBasic clangFormat clangRewrite clangToolingCore clangFrontend)
