@@ -34,6 +34,7 @@
 #include <clang/Basic/DiagnosticOptions.h>
 #include <clang/Frontend/TextDiagnosticPrinter.h>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <llvm-11/llvm/ADT/IntrusiveRefCntPtr.h>
 #include <llvm-11/llvm/ADT/Triple.h>
@@ -46,18 +47,6 @@
 #include <span>
 #include <sstream>
 #include <vector>
-
-class ClangFormatDiagConsumer : public clang::DiagnosticConsumer {
-  virtual void anchor() {}
-
-  void HandleDiagnostic(clang::DiagnosticsEngine::Level DiagLevel,
-                        const clang::Diagnostic &Info) override {
-
-    llvm::SmallVector<char, 16> vec;
-    Info.FormatDiagnostic(vec);
-    llvm::errs() << "clang-format error:" << vec << "\n";
-  }
-};
 
 void annotate_location(std::map<unsigned, std::string> &annotations,
                        const clang::SourceManager &sm, clang::Token token,
@@ -84,7 +73,6 @@ void replace_location(std::map<unsigned, std::string> &replacements,
   begin_offset = sm.getFileOffset(token.getLocation());
   assert(begin_offset != 0);
   replacements[begin_offset] = replacement;
-  // TODO: Determine whether I need to free up the clang variables here.
   return;
 }
 
@@ -154,7 +142,6 @@ void initialize_compilerinstance(
   auto DiagOpts = new clang::DiagnosticOptions();
   clang::TextDiagnosticPrinter *tpd =
       new clang::TextDiagnosticPrinter(llvm::errs(), DiagOpts, false);
-  ClangFormatDiagConsumer ignore_diagnostics;
 
   std::shared_ptr<clang::TargetOptions> target_options =
       std::make_shared<clang::TargetOptions>();
@@ -168,11 +155,42 @@ void initialize_compilerinstance(
   ci.createPreprocessor(clang::TU_Complete);
 }
 
+/*
+ * This function will calculate the number of digits in
+ * _num_.
+ */
+unsigned int calculate_padding(unsigned int num) {
+  unsigned int digits{0};
+  for (; num != 0; num /= 10, digits++);
+  return digits;
+}
+
+unsigned int count_lines(const std::unique_ptr<llvm::MemoryBuffer> &Code) {
+  unsigned int lines{0};
+  for (unsigned offset = 0; offset < Code->getBufferSize(); offset++) {
+    if (Code->getBuffer()[offset] == '\n') {
+      lines++;
+    }
+  }
+  return lines;
+}
+
 void print_annotated_file(
     const std::unique_ptr<llvm::MemoryBuffer> &FormattedCode,
     std::map<unsigned, std::string> annotations,
     std::map<unsigned, std::string> replacements) {
+
+  unsigned int line_number{1};
+  unsigned int line_number_width{calculate_padding(count_lines(FormattedCode))};
+  bool saw_newline{true};
   for (unsigned offset = 0; offset < FormattedCode->getBufferSize(); offset++) {
+
+    if (saw_newline) {
+      std::cout << std::setw(line_number_width) << std::right << line_number << std::setw(-1) << std::left << " ";
+      line_number++;
+      saw_newline = false;
+    }
+
     if (annotations.contains(offset)) {
       std::cout << annotations[offset];
     }
@@ -181,6 +199,11 @@ void print_annotated_file(
     } else {
       std::cout << FormattedCode->getBuffer()[offset];
     }
+
+    if (FormattedCode->getBuffer()[offset] == '\n') {
+      saw_newline = true;
+    }
+
   }
   std::cout << "\n";
 }
@@ -201,6 +224,7 @@ std::map<clang::tok::TokenKind, std::string> replacement_values{
 };
 
 int main(int argc, char **argv) {
+
   if (argc < 2) {
     return 1;
   }
