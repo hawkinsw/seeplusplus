@@ -161,7 +161,8 @@ void initialize_compilerinstance(
  */
 unsigned int calculate_padding(unsigned int num) {
   unsigned int digits{0};
-  for (; num != 0; num /= 10, digits++);
+  for (; num != 0; num /= 10, digits++)
+    ;
   return digits;
 }
 
@@ -186,7 +187,8 @@ void print_annotated_file(
   for (unsigned offset = 0; offset < FormattedCode->getBufferSize(); offset++) {
 
     if (saw_newline) {
-      std::cout << std::setw(line_number_width) << std::right << line_number << std::setw(-1) << std::left << " ";
+      std::cout << std::setw(line_number_width) << std::right << line_number
+                << std::setw(-1) << std::left << " ";
       line_number++;
       saw_newline = false;
     }
@@ -203,7 +205,6 @@ void print_annotated_file(
     if (FormattedCode->getBuffer()[offset] == '\n') {
       saw_newline = true;
     }
-
   }
   std::cout << "\n";
 }
@@ -223,10 +224,15 @@ std::map<clang::tok::TokenKind, std::string> replacement_values{
     {clang::tok::less, "&lt;"},
 };
 
+[[noreturn]] void usage(const std::string &arg0) {
+  std::cout << "Usage: " << arg0 << " <cpp source code file name>\n";
+  exit(EXIT_FAILURE);
+}
+
 int main(int argc, char **argv) {
 
   if (argc < 2) {
-    return 1;
+    usage(argv[0]);
   }
 
   llvm::IntrusiveRefCntPtr<llvm::vfs::InMemoryFileSystem> inmemory_fs(
@@ -238,7 +244,14 @@ int main(int argc, char **argv) {
   // First, let's do our clang formatting!
   llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> CodeOrError =
       llvm::MemoryBuffer::getFileAsStream(argv[1]);
+
+  if (CodeOrError.getError()) {
+    std::cout << "An error occurred attempting to open the file " << argv[1]
+              << ": " << CodeOrError.getError().message() << ".\n";
+    return 1;
+  }
   assert(!CodeOrError.getError());
+
   std::unique_ptr<llvm::MemoryBuffer> UnformattedCode =
       std::move(CodeOrError.get());
   clang::FileID unformatted_fid = create_in_memory_file(
@@ -248,8 +261,6 @@ int main(int argc, char **argv) {
   auto formatted_code_string =
       clang_format(std::move(UnformattedCode), unformatted_fid, inmemory_fs,
                    ci.getFileManager(), ci.getSourceManager());
-
-  std::cout << formatted_code_string << "\n";
 
   // Now, let's take that formatted code and treat it is an in-memory file.
   llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> FormattedCodeOrError =
