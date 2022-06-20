@@ -1,22 +1,17 @@
 #include "clang-c/CXString.h"
 #include "clang/Basic/Diagnostic.h"
-#include "clang/Basic/DiagnosticOptions.h"
 #include "clang/Basic/FileManager.h"
-#include "clang/Basic/FileSystemOptions.h"
 #include "clang/Basic/IdentifierTable.h"
-#include "clang/Basic/LangOptions.h"
 #include "clang/Basic/LangStandard.h"
 #include "clang/Basic/Module.h"
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Basic/SourceManager.h"
 #include "clang/Basic/TargetInfo.h"
-#include "clang/Basic/TargetOptions.h"
 #include "clang/Basic/TokenKinds.h"
 #include "clang/Basic/Version.h"
 #include "clang/Format/Format.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/CompilerInvocation.h"
-#include "clang/Frontend/FrontendOptions.h"
 #include "clang/Lex/Lexer.h"
 #include "clang/Lex/ModuleLoader.h"
 #include "clang/Lex/Preprocessor.h"
@@ -31,7 +26,6 @@
 #include "llvm/Support/Process.h"
 #include <cassert>
 #include <clang-c/Index.h>
-#include <clang/Basic/DiagnosticOptions.h>
 #include <clang/Frontend/TextDiagnosticPrinter.h>
 #include <fstream>
 #include <iomanip>
@@ -41,7 +35,6 @@
 #include <llvm-11/llvm/Support/MemoryBuffer.h>
 #include <llvm-11/llvm/Support/VirtualFileSystem.h>
 #include <llvm-11/llvm/Support/raw_ostream.h>
-#include <llvm-11/llvm/Target/TargetOptions.h>
 #include <map>
 #include <pthread.h>
 #include <span>
@@ -179,14 +172,15 @@ unsigned int count_lines(const std::unique_ptr<llvm::MemoryBuffer> &Code) {
 void print_annotated_file(
     const std::unique_ptr<llvm::MemoryBuffer> &FormattedCode,
     std::map<unsigned, std::string> annotations,
-    std::map<unsigned, std::string> replacements) {
+    std::map<unsigned, std::string> replacements, bool print_line_numbers) {
 
   unsigned int line_number{1};
-  unsigned int line_number_width{calculate_padding(count_lines(FormattedCode))};
+  unsigned int line_number_width =
+      print_line_numbers ? calculate_padding(count_lines(FormattedCode)) : 0;
   bool saw_newline{true};
   for (unsigned offset = 0; offset < FormattedCode->getBufferSize(); offset++) {
 
-    if (saw_newline) {
+    if (saw_newline && print_line_numbers) {
       std::cout << std::setw(line_number_width) << std::right << line_number
                 << std::setw(-1) << std::left << " ";
       line_number++;
@@ -224,15 +218,36 @@ std::map<clang::tok::TokenKind, std::string> replacement_values{
     {clang::tok::less, "&lt;"},
 };
 
-[[noreturn]] void usage(const std::string &arg0) {
-  std::cout << "Usage: " << arg0 << " <cpp source code file name>\n";
+[[noreturn]] void usage() {
+  llvm::cl::PrintHelpMessage();
   exit(EXIT_FAILURE);
 }
 
 int main(int argc, char **argv) {
 
-  if (argc < 2) {
-    usage(argv[0]);
+  llvm::raw_null_ostream raw_discard{};
+  llvm::cl::ResetCommandLineParser();
+
+  llvm::cl::OptionCategory SeePlusPlusCategory(
+      "See Plus Plus Options",
+      "Options for controlling the behavior of See Plus Plus.");
+  llvm::cl::opt<std::string> SourceCodeFilename(
+      llvm::cl::Positional, llvm::cl::desc("<source file>"), llvm::cl::Required,
+      llvm::cl::cat(SeePlusPlusCategory));
+  llvm::cl::opt<bool> SuppressLineNumbers(
+      "nl", llvm::cl::desc("Suppress line numbers in output."),
+      llvm::cl::cat(SeePlusPlusCategory));
+  llvm::cl::opt<bool> Help(
+      "help", llvm::cl::desc("Display available options"),
+      llvm::cl::ValueDisallowed, llvm::cl::cat(SeePlusPlusCategory));
+
+  llvm::cl::HideUnrelatedOptions(SeePlusPlusCategory);
+  if (!llvm::cl::ParseCommandLineOptions(argc, argv, "", &raw_discard)) {
+    usage();
+  }
+
+  if (Help) {
+    usage();
   }
 
   llvm::IntrusiveRefCntPtr<llvm::vfs::InMemoryFileSystem> inmemory_fs(
@@ -243,7 +258,7 @@ int main(int argc, char **argv) {
 
   // First, let's do our clang formatting!
   llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> CodeOrError =
-      llvm::MemoryBuffer::getFileAsStream(argv[1]);
+      llvm::MemoryBuffer::getFileAsStream(SourceCodeFilename);
 
   if (CodeOrError.getError()) {
     std::cout << "An error occurred attempting to open the file " << argv[1]
@@ -311,7 +326,8 @@ int main(int argc, char **argv) {
   }
 
   std::cout << "<html><head></head><body><pre>\n";
-  print_annotated_file(FormattedCode, annotations, replacements);
+  print_annotated_file(FormattedCode, annotations, replacements,
+                       !SuppressLineNumbers);
   std::cout << "</pre></body></html>\n";
 
   return 0;
